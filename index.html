@@ -93,57 +93,14 @@
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
     <script>
-      const URL_API = "URL_WEB_APP_KAMU"; // GANTI
-      const kantorLat = -2.2; // GANTI
-      const kantorLng = 113.9; // GANTI
+      let lastLat = null;
+      let lastLng = null;
+      let lastTime = null;
 
-      let userLat = null;
-      let userLng = null;
+      let skorCurang = 0;
 
-      // ===============================
-      // KAMERA
-      // ===============================
-      const video = document.getElementById("video");
-      navigator.mediaDevices
-        .getUserMedia({ video: true })
-        .then((stream) => (video.srcObject = stream));
-
-      // ===============================
-      // MAP INIT
-      // ===============================
-      const map = L.map("map").setView([-2.2, 113.9], 13);
-
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      }).addTo(map);
-
-      let marker = null;
-
-      // ===============================
-      // AMBIL LOKASI & TAMPILKAN DI MAP
-      // ===============================
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          userLat = position.coords.latitude;
-          userLng = position.coords.longitude;
-
-          map.setView([userLat, userLng], 16);
-
-          marker = L.marker([userLat, userLng])
-            .addTo(map)
-            .bindPopup("Lokasi Anda")
-            .openPopup();
-        },
-        () => {
-          document.getElementById("status").innerHTML =
-            "❌ Lokasi tidak diizinkan";
-        },
-      );
-
-      // ===============================
       // HITUNG JARAK
-      // ===============================
-      function hitungJarak(lat1, lon1, lat2, lon2) {
+      function jarak(lat1, lon1, lat2, lon2) {
         const R = 6371;
         const dLat = ((lat2 - lat1) * Math.PI) / 180;
         const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -155,68 +112,56 @@
             Math.sin(dLon / 2) *
             Math.sin(dLon / 2);
 
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       }
 
-      // ===============================
-      // ABSEN
-      // ===============================
-      function absen() {
-        const nama = document.getElementById("nama").value;
-        const statusText = document.getElementById("status");
+      // TRACKING REALTIME
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const acc = pos.coords.accuracy;
+          const now = Date.now();
 
-        if (!nama) {
-          statusText.innerHTML = "⚠️ Nama wajib diisi";
-          return;
-        }
+          console.log("Lokasi:", lat, lng);
 
-        navigator.geolocation.getCurrentPosition((position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          const accuracy = position.coords.accuracy;
+          // 🚩 1. CEK LONCAT LOKASI
+          if (lastLat !== null) {
+            const dist = jarak(lastLat, lastLng, lat, lng);
+            const timeDiff = (now - lastTime) / 1000; // detik
 
-          // VALIDASI AKURASI
-          if (accuracy > 50) {
-            statusText.innerHTML = "❌ GPS tidak akurat";
-            return;
+            const speed = dist / (timeDiff / 3600); // km/h
+
+            if (speed > 200) {
+              skorCurang += 2;
+              console.log("🚨 Loncat lokasi tidak wajar");
+            }
           }
 
-          // VALIDASI RADIUS
-          const jarak = hitungJarak(lat, lng, kantorLat, kantorLng);
-
-          if (jarak > 0.1) {
-            statusText.innerHTML = "❌ Di luar area kantor";
-            return;
+          // 🚩 2. CEK LOKASI TERLALU STABIL
+          if (lastLat !== null) {
+            if (Math.abs(lat - lastLat) < 0.000001) {
+              skorCurang += 1;
+              console.log("🚨 Lokasi terlalu stabil");
+            }
           }
 
-          // FOTO
-          const canvas = document.getElementById("canvas");
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(video, 0, 0, 300, 200);
-          const foto = canvas.toDataURL("image/png");
+          // 🚩 3. CEK AKURASI
+          if (acc > 100) {
+            skorCurang += 1;
+            console.log("🚨 Akurasi buruk");
+          }
 
-          statusText.innerHTML = "📤 Mengirim...";
+          lastLat = lat;
+          lastLng = lng;
+          lastTime = now;
 
-          fetch(URL_API, {
-            method: "POST",
-            body: JSON.stringify({
-              nama: nama,
-              lat: lat,
-              lng: lng,
-              accuracy: accuracy,
-              foto: foto,
-            }),
-          })
-            .then((res) => res.json())
-            .then((res) => {
-              statusText.innerHTML = "✅ Absensi berhasil";
-            })
-            .catch(() => {
-              statusText.innerHTML = "❌ Gagal kirim";
-            });
-        });
-      }
+          console.log("Skor Curang:", skorCurang);
+        },
+        (err) => {
+          console.log("GPS error");
+        },
+      );
     </script>
   </body>
 </html>
