@@ -3,9 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Absensi Digital</title>
+    <title>Deteksi Fake GPS</title>
 
-    <!-- LEAFLET -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 
     <style>
@@ -28,94 +27,77 @@
         text-align: center;
       }
 
-      input {
-        width: 100%;
-        padding: 10px;
-        border-radius: 8px;
-        border: 1px solid #ccc;
-        margin-bottom: 10px;
-      }
-
       video {
         width: 100%;
         border-radius: 10px;
-        margin-bottom: 10px;
       }
 
       #map {
         height: 200px;
-        border-radius: 10px;
         margin-top: 10px;
-      }
-
-      button {
-        width: 100%;
-        padding: 12px;
-        border: none;
         border-radius: 10px;
-        background: #4facfe;
-        color: white;
-        font-size: 16px;
-        margin-top: 10px;
-        cursor: pointer;
       }
 
       .status {
         margin-top: 10px;
         font-size: 14px;
+        font-weight: bold;
       }
     </style>
   </head>
 
   <body>
     <div class="container">
-      <h2>📍 Absensi Digital</h2>
-
-      <input type="text" id="nama" placeholder="Masukkan Nama" />
+      <h3>📍 Deteksi Lokasi</h3>
 
       <video id="video" autoplay></video>
-      <canvas
-        id="canvas"
-        width="300"
-        height="200"
-        style="display: none"
-      ></canvas>
 
-      <!-- MAP -->
       <div id="map"></div>
 
-      <button onclick="absen()">📸 Absen</button>
-
-      <div id="status" class="status"></div>
+      <div id="status" class="status">⏳ Mendeteksi lokasi...</div>
     </div>
 
-    <!-- LEAFLET JS -->
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
     <script>
-      let lastLat = null;
-      let lastLng = null;
-      let lastTime = null;
+      let lastLat = null,
+        lastLng = null,
+        lastTime = null;
+      let skor = 0;
+      let sudahAlert = false;
 
-      let skorCurang = 0;
+      const statusText = document.getElementById("status");
 
-      // HITUNG JARAK
-      function jarak(lat1, lon1, lat2, lon2) {
+      // ================= MAP =================
+      const map = L.map("map").setView([-2.2, 113.9], 13);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(
+        map,
+      );
+
+      let marker;
+
+      // ================= CAMERA =================
+      navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+        document.getElementById("video").srcObject = stream;
+      });
+
+      // ================= DISTANCE =================
+      function getDistance(lat1, lon1, lat2, lon2) {
         const R = 6371;
         const dLat = ((lat2 - lat1) * Math.PI) / 180;
         const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
         const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.sin(dLat / 2) ** 2 +
           Math.cos((lat1 * Math.PI) / 180) *
             Math.cos((lat2 * Math.PI) / 180) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
+            Math.sin(dLon / 2) ** 2;
 
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       }
 
-      // TRACKING REALTIME
+      // ================= TRACKING =================
       navigator.geolocation.watchPosition(
         (pos) => {
           const lat = pos.coords.latitude;
@@ -123,32 +105,35 @@
           const acc = pos.coords.accuracy;
           const now = Date.now();
 
-          console.log("Lokasi:", lat, lng);
+          console.log("📍 Lokasi:", lat, lng);
 
-          // 🚩 1. CEK LONCAT LOKASI
-          if (lastLat !== null) {
-            const dist = jarak(lastLat, lastLng, lat, lng);
-            const timeDiff = (now - lastTime) / 1000; // detik
+          // update map
+          map.setView([lat, lng], 16);
 
-            const speed = dist / (timeDiff / 3600); // km/h
+          if (marker) marker.remove();
+          marker = L.marker([lat, lng]).addTo(map);
+
+          // 🚨 loncat lokasi
+          if (lastLat) {
+            const dist = getDistance(lat, lng, lastLat, lastLng);
+            const time = (now - lastTime) / 1000;
+            const speed = dist / (time / 3600);
 
             if (speed > 200) {
-              skorCurang += 2;
-              console.log("🚨 Loncat lokasi tidak wajar");
+              skor += 2;
+              console.log("🚨 Loncat tidak wajar");
             }
           }
 
-          // 🚩 2. CEK LOKASI TERLALU STABIL
-          if (lastLat !== null) {
-            if (Math.abs(lat - lastLat) < 0.000001) {
-              skorCurang += 1;
-              console.log("🚨 Lokasi terlalu stabil");
-            }
+          // 🚨 terlalu stabil
+          if (lastLat && Math.abs(lat - lastLat) < 0.000001) {
+            skor += 1;
+            console.log("🚨 Lokasi terlalu stabil");
           }
 
-          // 🚩 3. CEK AKURASI
+          // 🚨 akurasi
           if (acc > 100) {
-            skorCurang += 1;
+            skor += 1;
             console.log("🚨 Akurasi buruk");
           }
 
@@ -156,10 +141,30 @@
           lastLng = lng;
           lastTime = now;
 
-          console.log("Skor Curang:", skorCurang);
+          console.log("⚠️ Skor:", skor);
+
+          // ================= STATUS =================
+          if (skor >= 5) {
+            console.log("❌ FAKE GPS TERDETEKSI");
+
+            statusText.innerHTML = "❌ Fake GPS terdeteksi!";
+            statusText.style.color = "red";
+
+            // ALERT KE USER
+            if (!sudahAlert) {
+              alert("⚠️ Anda terdeteksi menggunakan Fake GPS!");
+              sudahAlert = true;
+            }
+          } else if (skor >= 3) {
+            statusText.innerHTML = "⚠️ Lokasi mencurigakan";
+            statusText.style.color = "orange";
+          } else {
+            statusText.innerHTML = "✅ Lokasi normal";
+            statusText.style.color = "green";
+          }
         },
         (err) => {
-          console.log("GPS error");
+          statusText.innerHTML = "❌ GPS tidak diizinkan";
         },
       );
     </script>
