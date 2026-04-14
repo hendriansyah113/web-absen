@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Absensi Digital</title>
+
+    <!-- LEAFLET -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+    <style>
+      body {
+        font-family: "Segoe UI", sans-serif;
+        background: linear-gradient(135deg, #4facfe, #00f2fe);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+      }
+
+      .container {
+        background: #fff;
+        padding: 20px;
+        border-radius: 15px;
+        width: 350px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        text-align: center;
+      }
+
+      input {
+        width: 100%;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        margin-bottom: 10px;
+      }
+
+      video {
+        width: 100%;
+        border-radius: 10px;
+        margin-bottom: 10px;
+      }
+
+      #map {
+        height: 200px;
+        border-radius: 10px;
+        margin-top: 10px;
+      }
+
+      button {
+        width: 100%;
+        padding: 12px;
+        border: none;
+        border-radius: 10px;
+        background: #4facfe;
+        color: white;
+        font-size: 16px;
+        margin-top: 10px;
+        cursor: pointer;
+      }
+
+      .status {
+        margin-top: 10px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <h2>📍 Absensi Digital</h2>
+
+      <input type="text" id="nama" placeholder="Masukkan Nama" />
+
+      <video id="video" autoplay></video>
+      <canvas
+        id="canvas"
+        width="300"
+        height="200"
+        style="display: none"
+      ></canvas>
+
+      <!-- MAP -->
+      <div id="map"></div>
+
+      <button onclick="absen()">📸 Absen</button>
+
+      <div id="status" class="status"></div>
+    </div>
+
+    <!-- LEAFLET JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <script>
+      const URL_API = "URL_WEB_APP_KAMU"; // GANTI
+      const kantorLat = -2.2; // GANTI
+      const kantorLng = 113.9; // GANTI
+
+      let userLat = null;
+      let userLng = null;
+
+      // ===============================
+      // KAMERA
+      // ===============================
+      const video = document.getElementById("video");
+      navigator.mediaDevices
+        .getUserMedia({ video: true })
+        .then((stream) => (video.srcObject = stream));
+
+      // ===============================
+      // MAP INIT
+      // ===============================
+      const map = L.map("map").setView([-2.2, 113.9], 13);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+      }).addTo(map);
+
+      let marker = null;
+
+      // ===============================
+      // AMBIL LOKASI & TAMPILKAN DI MAP
+      // ===============================
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          userLat = position.coords.latitude;
+          userLng = position.coords.longitude;
+
+          map.setView([userLat, userLng], 16);
+
+          marker = L.marker([userLat, userLng])
+            .addTo(map)
+            .bindPopup("Lokasi Anda")
+            .openPopup();
+        },
+        () => {
+          document.getElementById("status").innerHTML =
+            "❌ Lokasi tidak diizinkan";
+        },
+      );
+
+      // ===============================
+      // HITUNG JARAK
+      // ===============================
+      function hitungJarak(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      }
+
+      // ===============================
+      // ABSEN
+      // ===============================
+      function absen() {
+        const nama = document.getElementById("nama").value;
+        const statusText = document.getElementById("status");
+
+        if (!nama) {
+          statusText.innerHTML = "⚠️ Nama wajib diisi";
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition((position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const accuracy = position.coords.accuracy;
+
+          // VALIDASI AKURASI
+          if (accuracy > 50) {
+            statusText.innerHTML = "❌ GPS tidak akurat";
+            return;
+          }
+
+          // VALIDASI RADIUS
+          const jarak = hitungJarak(lat, lng, kantorLat, kantorLng);
+
+          if (jarak > 0.1) {
+            statusText.innerHTML = "❌ Di luar area kantor";
+            return;
+          }
+
+          // FOTO
+          const canvas = document.getElementById("canvas");
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, 300, 200);
+          const foto = canvas.toDataURL("image/png");
+
+          statusText.innerHTML = "📤 Mengirim...";
+
+          fetch(URL_API, {
+            method: "POST",
+            body: JSON.stringify({
+              nama: nama,
+              lat: lat,
+              lng: lng,
+              accuracy: accuracy,
+              foto: foto,
+            }),
+          })
+            .then((res) => res.json())
+            .then((res) => {
+              statusText.innerHTML = "✅ Absensi berhasil";
+            })
+            .catch(() => {
+              statusText.innerHTML = "❌ Gagal kirim";
+            });
+        });
+      }
+    </script>
+  </body>
+</html>
